@@ -68,8 +68,8 @@ func (d *Dissector) Raw() string {
 
 // extract will navigate through the delimiters and will save the ending and starting position
 // of the keys. After we will resolve the positions with the required fields and do the reordering.
-func (d *Dissector) extract(s string) (positions, error) {
-	positions := make([]position, len(d.parser.fields))
+func (d *Dissector) extract(s string) (positions positions, err error) {
+	positions = make([]position, len(d.parser.fields))
 	var i, start, lookahead, end int
 
 	// Position on the first delimiter, we assume a hard match on the first delimiter.
@@ -86,18 +86,15 @@ func (d *Dissector) extract(s string) (positions, error) {
 	}
 	offset += dl.Len()
 
-	// move through all the other delimiters, until we have consumed all of them.
 	for dl.Next() != nil {
 		start = offset
-		end = dl.Next().IndexOf(s, offset)
-		if end == -1 {
-			return nil, fmt.Errorf(
-				"could not find delimiter: `%s` in remaining: `%s`, (offset: %d)",
-				dl.Delimiter(), s[offset:], offset,
-			)
+		end, err = d.step(s, i, offset)
+		if err != nil {
+			return nil, err
 		}
 
 		offset = end
+		positions[i] = position{start: start, end: end}
 
 		// Greedy consumes keys defined with padding.
 		// Keys are defined with `->` suffix.
@@ -112,12 +109,19 @@ func (d *Dissector) extract(s string) (positions, error) {
 			}
 		}
 
-		positions[i] = position{start: start, end: end}
 		offset += dl.Next().Len()
 		i++
 		dl = dl.Next()
 	}
 
+	// todo not work for fixed length string!
+	field := d.parser.fields[d.parser.fieldsIdMap[i]]
+
+	if field.IsFixedLength() && offset+field.Length() != len(s) {
+		return nil, fmt.Errorf("last fixed length key `%s` (length: %d) does not fit into remaining: `%s`, (offset: %d)",
+			field, field.Length(), s, offset,
+		)
+	}
 	// If we have remaining contents and have not captured all the requested fields
 	if offset < len(s) && i < len(d.parser.fields) {
 		positions[i] = position{start: offset, end: len(s)}
@@ -138,6 +142,39 @@ func (d *Dissector) resolve(s string, p positions) Map {
 	}
 	return m
 }
+
+// step gives current delimiter index and string offset and counts where dissector should step to
+func (d *Dissector) step(s string, i int, offset int) (stepTo int, err error) {
+	dl := d.parser.delimiters[i]
+	// corresponding filed of the delimiter
+	field := d.parser.fields[d.parser.fieldsIdMap[i]]
+
+	// for fixed-length field, just step the same length
+	if field.IsFixedLength() {
+		stepTo = offset + field.Length()
+		if stepTo > len(s) {
+			err = fmt.Errorf(
+				"field length is grater than string length: remaining: `%s`, (offset: %d), field: %s",
+				s[offset:], offset, field,
+			)
+		}
+	} else {
+		stepTo = dl.Next().IndexOf(s, offset)
+		if stepTo == -1 {
+			err = fmt.Errorf(
+				"could not find delimiter: `%s` in remaining: `%s`, (offset: %d)",
+				dl.Delimiter(), s[offset:], offset,
+			)
+		}
+	}
+
+	return stepTo, err
+}
+
+// countStep counts next delimiter start index of the given string
+//func countStep(s string, delimiter delimiter, field field) {
+//
+//}
 
 // New creates a new Dissector from a tokenized string.
 func New(tokenizer string) (*Dissector, error) {

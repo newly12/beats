@@ -52,53 +52,66 @@ type delimiter interface {
 	SetNext(d delimiter)
 }
 
-// zeroByte represents a zero string delimiter its usually start of the line.
-type zeroByte struct {
+type baseDelimiter struct {
 	needle string
+	length int
 	greedy bool
 	next   delimiter
 }
 
-func (z *zeroByte) IndexOf(haystack string, offset int) int {
-	return offset
+func (b *baseDelimiter) IndexOf(haystack string, offset int) int {
+	return offset + b.length
 }
 
-func (z *zeroByte) Len() int {
-	return 0
+func (b *baseDelimiter) Len() int {
+	return b.length
+}
+
+func (b *baseDelimiter) Delimiter() string {
+	return b.needle
+}
+
+func (b *baseDelimiter) IsGreedy() bool {
+	return b.greedy
+}
+
+func (b *baseDelimiter) MarkGreedy() {
+	b.greedy = true
+}
+
+func (b *baseDelimiter) Next() delimiter {
+	return b.next
+}
+
+func (b *baseDelimiter) SetNext(d delimiter) {
+	b.next = d
+}
+
+// zeroByte represents a zero string delimiter its usually start of the line.
+type zeroByte struct {
+	baseDelimiter
 }
 
 func (z *zeroByte) String() string {
 	return "delimiter: zerobyte"
 }
 
-func (z *zeroByte) Delimiter() string {
-	return z.needle
+// fixedLengthByte represents a delimiter with fixed-length bytes.
+type fixedLengthByte struct {
+	baseDelimiter
 }
 
-func (z *zeroByte) IsGreedy() bool {
-	return z.greedy
-}
-
-func (z *zeroByte) MarkGreedy() {
-	z.greedy = true
-}
-
-func (z *zeroByte) Next() delimiter {
-	return z.next
-}
-
-func (z *zeroByte) SetNext(d delimiter) {
-	z.next = d
+func (f *fixedLengthByte) String() string {
+	return fmt.Sprintf("delimiter: fixedlengthbyte (len: %d)", f.length)
 }
 
 // multiByte represents a delimiter with at least one byte.
 type multiByte struct {
-	needle string
-	greedy bool
-	next   delimiter
+	baseDelimiter
 }
 
 func (m *multiByte) IndexOf(haystack string, offset int) int {
+	// todo if fixed length, m.needle should not be used here
 	i := strings.Index(haystack[offset:], m.needle)
 	if i != -1 {
 		return i + offset
@@ -110,33 +123,13 @@ func (m *multiByte) Len() int {
 	return len(m.needle)
 }
 
-func (m *multiByte) IsGreedy() bool {
-	return m.greedy
-}
-
-func (m *multiByte) MarkGreedy() {
-	m.greedy = true
-}
-
 func (m *multiByte) String() string {
 	return fmt.Sprintf("delimiter: multibyte (match: '%s', len: %d)", string(m.needle), m.Len())
-}
-
-func (m *multiByte) Delimiter() string {
-	return m.needle
-}
-
-func (m *multiByte) Next() delimiter {
-	return m.next
-}
-
-func (m *multiByte) SetNext(d delimiter) {
-	m.next = d
 }
 
 func newDelimiter(needle string) delimiter {
 	if len(needle) == 0 {
 		return &zeroByte{}
 	}
-	return &multiByte{needle: needle}
+	return &multiByte{baseDelimiter{needle: needle}}
 }
